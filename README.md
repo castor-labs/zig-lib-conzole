@@ -16,7 +16,6 @@ A type-safe command-line argument parsing library for Zig that provides compile-
 - **Flag Support**: Boolean and value flags with default values
 - **Error Handling**: Clear error messages for invalid arguments and flags
 - **Zero Runtime Overhead**: All validation happens at compile time
-- **Unified Testing**: Single test command discovers and runs all tests using `std.testing.refAllDecls`
 
 ## Quick Start
 
