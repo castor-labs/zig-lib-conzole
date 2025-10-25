@@ -245,7 +245,7 @@ pub fn Command(comptime config: anytype) type {
 
         // Execute with hierarchical flag support
         pub fn executeWithHierarchy(
-            args: [][]const u8,
+            args: [][:0]u8,
             comptime shared_flags_param: anytype,
             comptime global_flags_param: anytype,
         ) !u8 {
@@ -254,13 +254,13 @@ pub fn Command(comptime config: anytype) type {
 
         // Receives a list of flags starting with either (--) or (-) into the
         // corresponding struct
-        pub fn execute(args: [][]const u8) !u8 {
+        pub fn execute(args: [][:0]u8) !u8 {
             return executeInternal(args, [_]type{}, [_]type{});
         }
 
         // Internal execute function that handles hierarchical flags
         fn executeInternal(
-            args: [][]const u8,
+            args: [][:0]u8,
             comptime shared_flags_param: anytype,
             comptime global_flags_param: anytype,
         ) !u8 {

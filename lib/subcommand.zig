@@ -62,17 +62,17 @@ pub fn SubCommand(comptime config: anytype) type {
         }
 
         // Execute with hierarchical flag support
-        pub fn executeWithGlobalFlags(args: [][]const u8, comptime global_flags: anytype) !u8 {
+        pub fn executeWithGlobalFlags(args: [][:0]u8, comptime global_flags: anytype) !u8 {
             return executeInternal(args, global_flags);
         }
 
         // Execute the subcommand with the given arguments
-        pub fn execute(args: [][]const u8) !u8 {
+        pub fn execute(args: [][:0]u8) !u8 {
             return executeInternal(args, [_]type{});
         }
 
         // Internal execute function
-        fn executeInternal(args: [][]const u8, comptime global_flags: anytype) !u8 {
+        fn executeInternal(args: [][:0]u8, comptime global_flags: anytype) !u8 {
             if (args.len == 0) {
                 printHelp();
                 return 1;
@@ -320,19 +320,36 @@ test "subcommand with nested commands" {
     });
 
     // Test add sub-command
-    var add_args = [_][]const u8{ "add", "--force", "upstream", "https://github.com/upstream/repo.git" };
+    var add_args = [_][:0]u8{
+        @constCast("add"),
+        @constCast("--force"),
+        @constCast("upstream"),
+        @constCast("https://github.com/upstream/repo.git")
+    };
     _ = try remote_subcommand.execute(add_args[0..]);
 
     // Test remove sub-command
-    var remove_args = [_][]const u8{ "remove", "--verbose", "origin" };
+    var remove_args = [_][:0]u8{
+        @constCast("remove"),
+        @constCast("--verbose"),
+        @constCast("origin")
+    };
     _ = try remote_subcommand.execute(remove_args[0..]);
 
     // Test list sub-command
-    var list_args = [_][]const u8{ "list", "--verbose" };
+    var list_args = [_][:0]u8{
+        @constCast("list"),
+        @constCast("--verbose")
+    };
     _ = try remote_subcommand.execute(list_args[0..]);
 
     // Test with shared flag
-    var shared_flag_args = [_][]const u8{ "--dry-run", "add", "test", "https://example.com" };
+    var shared_flag_args = [_][:0]u8{
+        @constCast("--dry-run"),
+        @constCast("add"),
+        @constCast("test"),
+        @constCast("https://example.com")
+    };
     _ = try remote_subcommand.execute(shared_flag_args[0..]);
 }
 

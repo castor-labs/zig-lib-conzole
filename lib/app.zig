@@ -73,7 +73,7 @@ pub fn App(comptime config: anytype) type {
         }
 
         // Run the application with the given arguments
-        pub fn run(args: [][]const u8) !u8 {
+        pub fn run(args: [][:0]u8) !u8 {
             if (args.len == 0) {
                 printHelp();
                 return 1;
@@ -133,7 +133,7 @@ pub fn App(comptime config: anytype) type {
             }
 
             const command_name = args[i];
-            const command_args = args[i + 1..];
+            const command_args = args[i + 1 ..];
 
             // Find and execute the matching command
             inline for (commands) |CommandType| {
@@ -206,7 +206,6 @@ pub fn App(comptime config: anytype) type {
                 try writer.print("\n{s}\n", .{app_help});
             }
         }
-
     };
 }
 
@@ -219,13 +218,13 @@ test "app with multiple commands" {
     const GreetArgs = struct {
         name: []const u8,
         loud: bool,
-        debug: bool,  // Global flag
+        debug: bool, // Global flag
     };
 
     const CountArgs = struct {
         number: i32,
         verbose: bool,
-        debug: bool,  // Global flag
+        debug: bool, // Global flag
     };
 
     // Define command actions
@@ -290,15 +289,27 @@ test "app with multiple commands" {
     });
 
     // Test greet command
-    var greet_args = [_][]const u8{ "greet", "--loud", "World" };
+    var greet_args = [_][:0]u8{
+        @constCast("greet"),
+        @constCast("--loud"),
+        @constCast("World")
+    };
     _ = try test_app.run(greet_args[0..]);
 
     // Test count command
-    var count_args = [_][]const u8{ "count", "--verbose", "3" };
+    var count_args = [_][:0]u8{
+        @constCast("count"),
+        @constCast("--verbose"),
+        @constCast("3")
+    };
     _ = try test_app.run(count_args[0..]);
 
     // Test with global flag
-    var global_flag_args = [_][]const u8{ "--debug", "greet", "Alice" };
+    var global_flag_args = [_][:0]u8{
+        @constCast("--debug"),
+        @constCast("greet"),
+        @constCast("Alice")
+    };
     _ = try test_app.run(global_flag_args[0..]);
 }
 
@@ -333,13 +344,13 @@ test "app description accessibility" {
         .name = "test-app",
         .description = "This is a test application",
         .help =
-            \\This is a comprehensive help text for the test application.
-            \\It provides detailed information about the application's
-            \\purpose, usage patterns, and available functionality.
-            \\
-            \\Examples:
-            \\  test-app command --flag value
-            \\  test-app --global-flag command
+        \\This is a comprehensive help text for the test application.
+        \\It provides detailed information about the application's
+        \\purpose, usage patterns, and available functionality.
+        \\
+        \\Examples:
+        \\  test-app command --flag value
+        \\  test-app --global-flag command
         ,
         .commands = .{test_command},
         .flags = [_]type{

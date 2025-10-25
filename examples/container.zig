@@ -301,13 +301,6 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    // Convert args to the expected type
-    var const_args = try allocator.alloc([]const u8, args.len);
-    defer allocator.free(const_args);
-    for (args, 0..) |arg, i| {
-        const_args[i] = arg;
-    }
-
     // Container commands
     const container_run_command = conzole.Command(.{
         .name = "run",
@@ -499,6 +492,6 @@ pub fn main() !void {
         },
     });
 
-    const exit_code = try app.run(const_args[1..]);
+    const exit_code = try app.run(args[1..]);
     std.process.exit(@intCast(exit_code));
 }
