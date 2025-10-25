@@ -1,4 +1,6 @@
 const std = @import("std");
+const parse = @import("./parse.zig");
+const render = @import("./render.zig");
 
 // App struct that holds multiple commands and global flags
 pub fn App(comptime config: anytype) type {
@@ -85,85 +87,36 @@ pub fn App(comptime config: anytype) type {
             while (i < args.len) {
                 const arg = args[i];
 
-                if (std.mem.startsWith(u8, arg, "--")) {
-                    // Long flag (--flag-name or --flag-name=value)
-                    const flag_part = arg[2..];
-                    var flag_name: []const u8 = undefined;
-                    var flag_value: ?[]const u8 = null;
-
-                    // Check for concatenated value with =
-                    if (std.mem.indexOf(u8, flag_part, "=")) |eq_pos| {
-                        flag_name = flag_part[0..eq_pos];
-                        flag_value = flag_part[eq_pos + 1..];
-                    } else {
-                        flag_name = flag_part;
-                    }
-
-                    var flag_found = false;
-                    inline for (global_flags) |FlagType| {
-                        if (std.mem.eql(u8, flag_name, FlagType.flag_name)) {
-                            flag_found = true;
-
-                            if (@typeInfo(FlagType.ValueType) == .bool) {
-                                // Boolean flag, just consume it
-                            } else {
-                                // Non-boolean flag, consume the value too if not concatenated
-                                if (flag_value == null) {
-                                    if (i + 1 >= args.len) {
-                                        std.debug.print("Error: Global flag --{s} requires a value\n", .{flag_name});
-                                        return 1;
-                                    }
-                                    i += 1;
-                                }
-                            }
-                            break;
-                        }
-                    }
-
-                    if (flag_found) {
-                        i += 1;
-                        continue;
-                    } else {
-                        // Not a global flag, might be a command flag
+                if (parse.isFlag(arg)) {
+                    // Parse flag argument
+                    const flag_result = parse.flagArg(arg) orelse {
+                        // Not a valid flag, treat as positional argument
                         break;
-                    }
-                } else if (std.mem.startsWith(u8, arg, "-") and arg.len > 1) {
-                    // Short flag (-f or -f=value)
-                    const flag_part = arg[1..];
-                    var flag_alias: []const u8 = undefined;
-                    var flag_value: ?[]const u8 = null;
+                    };
 
-                    // Check for concatenated value with =
-                    if (std.mem.indexOf(u8, flag_part, "=")) |eq_pos| {
-                        flag_alias = flag_part[0..eq_pos];
-                        flag_value = flag_part[eq_pos + 1..];
-                    } else {
-                        flag_alias = flag_part;
+                    // Validate short flags
+                    if (flag_result.is_short) {
+                        parse.validateShortFlag(flag_result.flag_alias, arg) catch return 1;
                     }
 
-                    // Only support single character aliases
-                    if (flag_alias.len != 1) {
-                        std.debug.print("Error: Short flags must be single characters: {s}\n", .{arg});
-                        return 1;
-                    }
-
+                    // Find matching flag in global flags
                     var flag_found = false;
                     inline for (global_flags) |FlagType| {
-                        if (FlagType.flag_alias.len > 0 and std.mem.eql(u8, flag_alias, FlagType.flag_alias)) {
+                        const matches = if (flag_result.is_short)
+                            FlagType.flag_alias.len > 0 and std.mem.eql(u8, flag_result.flag_alias, FlagType.flag_alias)
+                        else
+                            std.mem.eql(u8, flag_result.flag_name, FlagType.flag_name);
+
+                        if (matches) {
                             flag_found = true;
 
-                            if (@typeInfo(FlagType.ValueType) == .bool) {
-                                // Boolean flag, just consume it
-                            } else {
-                                // Non-boolean flag, consume the value too if not concatenated
-                                if (flag_value == null) {
-                                    if (i + 1 >= args.len) {
-                                        std.debug.print("Error: Global flag -{s} requires a value\n", .{flag_alias});
-                                        return 1;
-                                    }
-                                    i += 1;
-                                }
-                            }
+                            const flag_display = if (flag_result.is_short)
+                                try std.fmt.allocPrint(std.heap.page_allocator, "-{s}", .{flag_result.flag_alias})
+                            else
+                                try std.fmt.allocPrint(std.heap.page_allocator, "--{s}", .{flag_result.flag_name});
+                            defer std.heap.page_allocator.free(flag_display);
+
+                            parse.skipFlag(FlagType, args, &i, flag_result.flag_value, flag_display) catch return 1;
                             break;
                         }
                     }
@@ -234,39 +187,22 @@ pub fn App(comptime config: anytype) type {
             // App name and description
             try writer.print("{s} - {s}\n", .{ app_name, app_description });
 
-            // Usage line
+            // Usage line (App has no arguments, just commands)
             try writer.print("\nUSAGE:\n    {s}", .{app_name});
 
-            const has_global_flags = global_flags.len > 0;
-
-            if (has_global_flags) {
+            if (global_flags.len > 0) {
                 try writer.print(" [GLOBAL_FLAGS]", .{});
             }
-
             try writer.print(" <COMMAND> [COMMAND_ARGS]\n", .{});
 
-            // Global flags section
-            if (has_global_flags) {
-                try writer.print("\nGLOBAL FLAGS:\n", .{});
-                inline for (global_flags) |FlagType| {
-                    if (FlagType.flag_alias.len > 0) {
-                        try writer.print("    -{s}, --{s:<14} {s}\n", .{ FlagType.flag_alias, FlagType.flag_name, FlagType.description });
-                    } else {
-                        try writer.print("        --{s:<14} {s}\n", .{ FlagType.flag_name, FlagType.description });
-                    }
-                }
-            }
+            // Flags sections
+            try render.flagHelp(writer, global_flags, "GLOBAL FLAGS");
 
             // Commands section
-            try writer.print("\nCOMMANDS:\n", .{});
-            inline for (commands) |CommandType| {
-                try writer.print("    {s:<16} {s}\n", .{ CommandType.name, CommandType.description });
-            }
+            try render.commands(writer, commands);
 
             // Add custom help text at the end if available
-            if (app_help.len > 0) {
-                try writer.print("\n{s}\n", .{app_help});
-            }
+            try render.customHelp(writer, app_help);
         }
     };
 }

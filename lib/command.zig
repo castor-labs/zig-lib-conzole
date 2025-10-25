@@ -1,4 +1,6 @@
 const std = @import("std");
+const parse = @import("./parse.zig");
+const render = @import("./render.zig");
 
 // Function to validate that a manually defined struct matches the command definition
 // Now supports hierarchical flag validation
@@ -285,18 +287,16 @@ pub fn Command(comptime config: anytype) type {
             while (i < args.len) {
                 const arg = args[i];
 
-                if (std.mem.startsWith(u8, arg, "--")) {
-                    // Long flag (--flag-name or --flag-name=value)
-                    const flag_part = arg[2..];
-                    var flag_name: []const u8 = undefined;
-                    var flag_value: ?[]const u8 = null;
+                if (parse.isFlag(arg)) {
+                    // Parse flag argument
+                    const flag_result = parse.flagArg(arg) orelse {
+                        // Not a valid flag, treat as positional argument
+                        break;
+                    };
 
-                    // Check for concatenated value with =
-                    if (std.mem.indexOf(u8, flag_part, "=")) |eq_pos| {
-                        flag_name = flag_part[0..eq_pos];
-                        flag_value = flag_part[eq_pos + 1..];
-                    } else {
-                        flag_name = flag_part;
+                    // Validate short flags
+                    if (flag_result.is_short) {
+                        try parse.validateShortFlag(flag_result.flag_alias, arg);
                     }
 
                     // Find matching flag across all hierarchy levels
@@ -304,29 +304,26 @@ pub fn Command(comptime config: anytype) type {
 
                     // Check command flags first
                     inline for (flags) |FlagType| {
-                        if (std.mem.eql(u8, flag_name, FlagType.flag_name)) {
+                        const matches = if (flag_result.is_short)
+                            FlagType.flag_alias.len > 0 and std.mem.eql(u8, flag_result.flag_alias, FlagType.flag_alias)
+                        else
+                            std.mem.eql(u8, flag_result.flag_name, FlagType.flag_name);
+
+                        if (matches) {
                             flag_found = true;
 
-                            // Check if this flag expects a value
-                            if (@typeInfo(FlagType.ValueType) == .bool) {
-                                // Boolean flags: use provided value or default to true
-                                @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
-                            } else {
-                                // Non-boolean flags need a value
-                                if (flag_value == null) {
-                                    // No concatenated value, check next argument
-                                    if (i + 1 >= args.len) {
-                                        std.debug.print("Error: Flag --{s} requires a value\n\n", .{flag_name});
-                                        printHelp(shared_flags_param, global_flags_param);
-                                        return 1;
-                                    }
-                                    i += 1;
-                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(args[i]);
-                                } else {
-                                    // Use concatenated value
-                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
-                                }
-                            }
+                            const flag_display = if (flag_result.is_short)
+                                try std.fmt.allocPrint(std.heap.page_allocator, "-{s}", .{flag_result.flag_alias})
+                            else
+                                try std.fmt.allocPrint(std.heap.page_allocator, "--{s}", .{flag_result.flag_name});
+                            defer std.heap.page_allocator.free(flag_display);
+
+                            const value = parse.consumeFlagValue(FlagType, args, &i, flag_result.flag_value, flag_display) catch {
+                                printHelp(shared_flags_param, global_flags_param);
+                                return 1;
+                            };
+
+                            @field(parsed_args, &FlagType.field_name) = FlagType.parse(value);
                             break;
                         }
                     }
@@ -334,24 +331,26 @@ pub fn Command(comptime config: anytype) type {
                     // Check shared flags if not found in command flags
                     if (!flag_found) {
                         inline for (shared_flags_param) |FlagType| {
-                            if (std.mem.eql(u8, flag_name, FlagType.flag_name)) {
+                            const matches = if (flag_result.is_short)
+                                FlagType.flag_alias.len > 0 and std.mem.eql(u8, flag_result.flag_alias, FlagType.flag_alias)
+                            else
+                                std.mem.eql(u8, flag_result.flag_name, FlagType.flag_name);
+
+                            if (matches) {
                                 flag_found = true;
 
-                                if (@typeInfo(FlagType.ValueType) == .bool) {
-                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
-                                } else {
-                                    if (flag_value == null) {
-                                        if (i + 1 >= args.len) {
-                                            std.debug.print("Error: Shared flag --{s} requires a value\n\n", .{flag_name});
-                                            printHelp(shared_flags_param, global_flags_param);
-                                            return 1;
-                                        }
-                                        i += 1;
-                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(args[i]);
-                                    } else {
-                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
-                                    }
-                                }
+                                const flag_display = if (flag_result.is_short)
+                                    try std.fmt.allocPrint(std.heap.page_allocator, "-{s}", .{flag_result.flag_alias})
+                                else
+                                    try std.fmt.allocPrint(std.heap.page_allocator, "--{s}", .{flag_result.flag_name});
+                                defer std.heap.page_allocator.free(flag_display);
+
+                                const value = parse.consumeFlagValue(FlagType, args, &i, flag_result.flag_value, flag_display) catch {
+                                    printHelp(shared_flags_param, global_flags_param);
+                                    return 1;
+                                };
+
+                                @field(parsed_args, &FlagType.field_name) = FlagType.parse(value);
                                 break;
                             }
                         }
@@ -360,136 +359,39 @@ pub fn Command(comptime config: anytype) type {
                     // Check global flags if not found in shared flags
                     if (!flag_found) {
                         inline for (global_flags_param) |FlagType| {
-                            if (std.mem.eql(u8, flag_name, FlagType.flag_name)) {
+                            const matches = if (flag_result.is_short)
+                                FlagType.flag_alias.len > 0 and std.mem.eql(u8, flag_result.flag_alias, FlagType.flag_alias)
+                            else
+                                std.mem.eql(u8, flag_result.flag_name, FlagType.flag_name);
+
+                            if (matches) {
                                 flag_found = true;
 
-                                if (@typeInfo(FlagType.ValueType) == .bool) {
-                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
-                                } else {
-                                    if (flag_value == null) {
-                                        if (i + 1 >= args.len) {
-                                            std.debug.print("Error: Global flag --{s} requires a value\n\n", .{flag_name});
-                                            printHelp(shared_flags_param, global_flags_param);
-                                            return 1;
-                                        }
-                                        i += 1;
-                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(args[i]);
-                                    } else {
-                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
-                                    }
-                                }
+                                const flag_display = if (flag_result.is_short)
+                                    try std.fmt.allocPrint(std.heap.page_allocator, "-{s}", .{flag_result.flag_alias})
+                                else
+                                    try std.fmt.allocPrint(std.heap.page_allocator, "--{s}", .{flag_result.flag_name});
+                                defer std.heap.page_allocator.free(flag_display);
+
+                                const value = parse.consumeFlagValue(FlagType, args, &i, flag_result.flag_value, flag_display) catch {
+                                    printHelp(shared_flags_param, global_flags_param);
+                                    return 1;
+                                };
+
+                                @field(parsed_args, &FlagType.field_name) = FlagType.parse(value);
                                 break;
                             }
                         }
                     }
 
                     if (!flag_found) {
-                        std.debug.print("Error: Unknown flag --{s}\n\n", .{flag_name});
-                        printHelp(shared_flags_param, global_flags_param);
-                        return 1;
-                    }
-                } else if (std.mem.startsWith(u8, arg, "-") and arg.len > 1) {
-                    // Short flag (-f or -f=value)
-                    const flag_part = arg[1..];
-                    var flag_alias: []const u8 = undefined;
-                    var flag_value: ?[]const u8 = null;
+                        const flag_display = if (flag_result.is_short)
+                            try std.fmt.allocPrint(std.heap.page_allocator, "-{s}", .{flag_result.flag_alias})
+                        else
+                            try std.fmt.allocPrint(std.heap.page_allocator, "--{s}", .{flag_result.flag_name});
+                        defer std.heap.page_allocator.free(flag_display);
 
-                    // Check for concatenated value with =
-                    if (std.mem.indexOf(u8, flag_part, "=")) |eq_pos| {
-                        flag_alias = flag_part[0..eq_pos];
-                        flag_value = flag_part[eq_pos + 1..];
-                    } else {
-                        flag_alias = flag_part;
-                    }
-
-                    // Only support single character aliases
-                    if (flag_alias.len != 1) {
-                        std.debug.print("Error: Short flags must be single characters: {s}\n\n", .{arg});
-                        printHelp(shared_flags_param, global_flags_param);
-                        return 1;
-                    }
-
-                    // Find matching flag by alias across all hierarchy levels
-                    var flag_found = false;
-
-                    // Check command flags first
-                    inline for (flags) |FlagType| {
-                        if (FlagType.flag_alias.len > 0 and std.mem.eql(u8, flag_alias, FlagType.flag_alias)) {
-                            flag_found = true;
-
-                            if (@typeInfo(FlagType.ValueType) == .bool) {
-                                @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
-                            } else {
-                                if (flag_value == null) {
-                                    if (i + 1 >= args.len) {
-                                        std.debug.print("Error: Flag -{s} requires a value\n\n", .{flag_alias});
-                                        printHelp(shared_flags_param, global_flags_param);
-                                        return 1;
-                                    }
-                                    i += 1;
-                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(args[i]);
-                                } else {
-                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
-                                }
-                            }
-                            break;
-                        }
-                    }
-
-                    // Check shared flags if not found in command flags
-                    if (!flag_found) {
-                        inline for (shared_flags_param) |FlagType| {
-                            if (FlagType.flag_alias.len > 0 and std.mem.eql(u8, flag_alias, FlagType.flag_alias)) {
-                                flag_found = true;
-
-                                if (@typeInfo(FlagType.ValueType) == .bool) {
-                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
-                                } else {
-                                    if (flag_value == null) {
-                                        if (i + 1 >= args.len) {
-                                            std.debug.print("Error: Shared flag -{s} requires a value\n\n", .{flag_alias});
-                                            printHelp(shared_flags_param, global_flags_param);
-                                            return 1;
-                                        }
-                                        i += 1;
-                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(args[i]);
-                                    } else {
-                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
-                                    }
-                                }
-                                break;
-                            }
-                        }
-                    }
-
-                    // Check global flags if not found in shared flags
-                    if (!flag_found) {
-                        inline for (global_flags_param) |FlagType| {
-                            if (FlagType.flag_alias.len > 0 and std.mem.eql(u8, flag_alias, FlagType.flag_alias)) {
-                                flag_found = true;
-
-                                if (@typeInfo(FlagType.ValueType) == .bool) {
-                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
-                                } else {
-                                    if (flag_value == null) {
-                                        if (i + 1 >= args.len) {
-                                            std.debug.print("Error: Global flag -{s} requires a value\n\n", .{flag_alias});
-                                            printHelp(shared_flags_param, global_flags_param);
-                                            return 1;
-                                        }
-                                        i += 1;
-                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(args[i]);
-                                    } else {
-                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
-                                    }
-                                }
-                                break;
-                            }
-                        }
-                    }
-
-                    if (!flag_found) {
-                        std.debug.print("Error: Unknown flag -{s}\n\n", .{flag_alias});
+                        std.debug.print("Error: Unknown flag {s}\n\n", .{flag_display});
                         printHelp(shared_flags_param, global_flags_param);
                         return 1;
                     }
@@ -538,78 +440,18 @@ pub fn Command(comptime config: anytype) type {
             try writer.print("{s} - {s}\n", .{ command_name, command_description });
 
             // Usage line
-            try writer.print("\nUSAGE:\n    {s}", .{command_name});
-
-            // Add flags to usage
-            const has_global_flags = global_flags_param.len > 0;
-            const has_shared_flags = shared_flags_param.len > 0;
-            const has_command_flags = flags.len > 0;
-
-            if (has_global_flags) {
-                try writer.print(" [GLOBAL_FLAGS]", .{});
-            }
-            if (has_shared_flags) {
-                try writer.print(" [SHARED_FLAGS]", .{});
-            }
-            if (has_command_flags) {
-                try writer.print(" [FLAGS]", .{});
-            }
-
-            // Add arguments to usage
-            inline for (arguments) |ArgumentType| {
-                try writer.print(" <{s}>", .{ArgumentType.arg_name});
-            }
-
-            try writer.print("\n", .{});
+            try render.usageLine(writer, command_name, global_flags_param, shared_flags_param, flags, arguments);
 
             // Arguments section
-            if (arguments.len > 0) {
-                try writer.print("\nARGUMENTS:\n", .{});
-                inline for (arguments) |ArgumentType| {
-                    try writer.print("    {s:<20} {s}\n", .{ ArgumentType.arg_name, ArgumentType.description });
-                }
-            }
+            try render.arguments(writer, arguments);
 
-            // Global flags section
-            if (has_global_flags) {
-                try writer.print("\nGLOBAL FLAGS:\n", .{});
-                inline for (global_flags_param) |FlagType| {
-                    if (FlagType.flag_alias.len > 0) {
-                        try writer.print("    -{s}, --{s:<14} {s}\n", .{ FlagType.flag_alias, FlagType.flag_name, FlagType.description });
-                    } else {
-                        try writer.print("        --{s:<14} {s}\n", .{ FlagType.flag_name, FlagType.description });
-                    }
-                }
-            }
-
-            // Shared flags section
-            if (has_shared_flags) {
-                try writer.print("\nSHARED FLAGS:\n", .{});
-                inline for (shared_flags_param) |FlagType| {
-                    if (FlagType.flag_alias.len > 0) {
-                        try writer.print("    -{s}, --{s:<14} {s}\n", .{ FlagType.flag_alias, FlagType.flag_name, FlagType.description });
-                    } else {
-                        try writer.print("        --{s:<14} {s}\n", .{ FlagType.flag_name, FlagType.description });
-                    }
-                }
-            }
-
-            // Command flags section
-            if (has_command_flags) {
-                try writer.print("\nFLAGS:\n", .{});
-                inline for (flags) |FlagType| {
-                    if (FlagType.flag_alias.len > 0) {
-                        try writer.print("    -{s}, --{s:<14} {s}\n", .{ FlagType.flag_alias, FlagType.flag_name, FlagType.description });
-                    } else {
-                        try writer.print("        --{s:<14} {s}\n", .{ FlagType.flag_name, FlagType.description });
-                    }
-                }
-            }
+            // Flags sections
+            try render.flagHelp(writer, global_flags_param, "GLOBAL FLAGS");
+            try render.flagHelp(writer, shared_flags_param, "SHARED FLAGS");
+            try render.flagHelp(writer, flags, "FLAGS");
 
             // Add custom help text at the end if available
-            if (command_help.len > 0) {
-                try writer.print("\n{s}\n", .{command_help});
-            }
+            try render.customHelp(writer, command_help);
         }
     };
 }

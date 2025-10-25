@@ -1,4 +1,6 @@
 const std = @import("std");
+const parse = @import("./parse.zig");
+const render = @import("./render.zig");
 
 // SubCommand struct that holds multiple commands and shared flags
 pub fn SubCommand(comptime config: anytype) type {
@@ -84,90 +86,46 @@ pub fn SubCommand(comptime config: anytype) type {
             while (i < args.len) {
                 const arg = args[i];
 
-                if (std.mem.startsWith(u8, arg, "--")) {
-                    // Long flag (--flag-name or --flag-name=value)
-                    const flag_part = arg[2..];
-                    var flag_name: []const u8 = undefined;
-                    var flag_value: ?[]const u8 = null;
+                if (parse.isFlag(arg)) {
+                    // Parse flag argument
+                    const flag_result = parse.flagArg(arg) orelse {
+                        // Not a valid flag, treat as positional argument
+                        break;
+                    };
 
-                    // Check for concatenated value with =
-                    if (std.mem.indexOf(u8, flag_part, "=")) |eq_pos| {
-                        flag_name = flag_part[0..eq_pos];
-                        flag_value = flag_part[eq_pos + 1..];
-                    } else {
-                        flag_name = flag_part;
+                    // Validate short flags
+                    if (flag_result.is_short) {
+                        parse.validateShortFlag(flag_result.flag_alias, arg) catch return 1;
                     }
 
+                    // Find matching flag in shared flags
                     var flag_found = false;
                     inline for (shared_flags) |FlagType| {
-                        if (std.mem.eql(u8, flag_name, FlagType.flag_name)) {
+                        const matches = if (flag_result.is_short)
+                            FlagType.flag_alias.len > 0 and std.mem.eql(u8, flag_result.flag_alias, FlagType.flag_alias)
+                        else
+                            std.mem.eql(u8, flag_result.flag_name, FlagType.flag_name);
+
+                        if (matches) {
                             flag_found = true;
 
-                            if (@typeInfo(FlagType.ValueType) == .bool) {
-                                // Boolean flag, just consume it
-                            } else {
-                                // Non-boolean flag, consume the value too if not concatenated
-                                if (flag_value == null) {
-                                    if (i + 1 >= args.len) {
-                                        std.debug.print("Error: Shared flag --{s} requires a value\n", .{flag_name});
-                                        return 1;
-                                    }
-                                    i += 1;
-                                }
-                            }
+                            const flag_display = if (flag_result.is_short)
+                                try std.fmt.allocPrint(std.heap.page_allocator, "-{s}", .{flag_result.flag_alias})
+                            else
+                                try std.fmt.allocPrint(std.heap.page_allocator, "--{s}", .{flag_result.flag_name});
+                            defer std.heap.page_allocator.free(flag_display);
+
+                            parse.skipFlag(FlagType, args, &i, flag_result.flag_value, flag_display) catch return 1;
                             break;
                         }
                     }
-                    
+
                     if (flag_found) {
                         i += 1;
                         continue;
                     } else {
                         // Not a shared flag, might be a command flag
                         break;
-                    }
-                } else if (std.mem.startsWith(u8, arg, "-") and arg.len > 1) {
-                    // Short flag (-f or -f=value)
-                    const flag_part = arg[1..];
-                    var flag_alias: []const u8 = undefined;
-                    var flag_value: ?[]const u8 = null;
-
-                    // Check for concatenated value with =
-                    if (std.mem.indexOf(u8, flag_part, "=")) |eq_pos| {
-                        flag_alias = flag_part[0..eq_pos];
-                        flag_value = flag_part[eq_pos + 1..];
-                    } else {
-                        flag_alias = flag_part;
-                    }
-
-                    // Only support single character aliases
-                    if (flag_alias.len != 1) {
-                        std.debug.print("Error: Short flags must be single characters: {s}\n", .{arg});
-                        return 1;
-                    }
-
-                    // Find matching flag by alias in shared flags
-                    var flag_found = false;
-                    inline for (shared_flags) |FlagType| {
-                        if (FlagType.flag_alias.len > 0 and std.mem.eql(u8, flag_alias, FlagType.flag_alias)) {
-                            flag_found = true;
-                            // Note: SubCommand doesn't parse flag values, just skips them
-                            // The actual parsing happens in the Command
-                            break;
-                        }
-                    }
-
-                    if (!flag_found) {
-                        std.debug.print("Error: Unknown flag -{s}\n", .{flag_alias});
-                        return 1;
-                    }
-
-                    // Skip flag value if it's not concatenated
-                    if (flag_value == null) {
-                        // Check if next arg is a value (doesn't start with -)
-                        if (i + 1 < args.len and !std.mem.startsWith(u8, args[i + 1], "-")) {
-                            i += 1; // Skip the value
-                        }
                     }
                 } else {
                     // This is the sub-command name
@@ -222,55 +180,26 @@ pub fn SubCommand(comptime config: anytype) type {
             // SubCommand name and description
             try writer.print("{s} - {s}\n", .{ subcommand_name, subcommand_description });
 
-            // Usage line
+            // Usage line (SubCommand has no arguments, just commands)
             try writer.print("\nUSAGE:\n    {s}", .{subcommand_name});
 
-            const has_global_flags = global_flags.len > 0;
-            const has_shared_flags = shared_flags.len > 0;
-
-            if (has_global_flags) {
+            if (global_flags.len > 0) {
                 try writer.print(" [GLOBAL_FLAGS]", .{});
             }
-            if (has_shared_flags) {
+            if (shared_flags.len > 0) {
                 try writer.print(" [SHARED_FLAGS]", .{});
             }
-
             try writer.print(" <COMMAND> [COMMAND_ARGS]\n", .{});
 
-            // Global flags section
-            if (has_global_flags) {
-                try writer.print("\nGLOBAL FLAGS:\n", .{});
-                inline for (global_flags) |FlagType| {
-                    if (FlagType.flag_alias.len > 0) {
-                        try writer.print("    -{s}, --{s:<14} {s}\n", .{ FlagType.flag_alias, FlagType.flag_name, FlagType.description });
-                    } else {
-                        try writer.print("        --{s:<14} {s}\n", .{ FlagType.flag_name, FlagType.description });
-                    }
-                }
-            }
-
-            // Shared flags section
-            if (has_shared_flags) {
-                try writer.print("\nSHARED FLAGS:\n", .{});
-                inline for (shared_flags) |FlagType| {
-                    if (FlagType.flag_alias.len > 0) {
-                        try writer.print("    -{s}, --{s:<14} {s}\n", .{ FlagType.flag_alias, FlagType.flag_name, FlagType.description });
-                    } else {
-                        try writer.print("        --{s:<14} {s}\n", .{ FlagType.flag_name, FlagType.description });
-                    }
-                }
-            }
+            // Flags sections
+            try render.flagHelp(writer, global_flags, "GLOBAL FLAGS");
+            try render.flagHelp(writer, shared_flags, "SHARED FLAGS");
 
             // Commands section
-            try writer.print("\nCOMMANDS:\n", .{});
-            inline for (commands) |CommandType| {
-                try writer.print("    {s:<16} {s}\n", .{ CommandType.name, CommandType.description });
-            }
+            try render.commands(writer, commands);
 
             // Add custom help text at the end if available
-            if (subcommand_help.len > 0) {
-                try writer.print("\n{s}\n", .{subcommand_help});
-            }
+            try render.customHelp(writer, subcommand_help);
         }
     };
 }
