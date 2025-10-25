@@ -85,22 +85,35 @@ pub fn SubCommand(comptime config: anytype) type {
                 const arg = args[i];
 
                 if (std.mem.startsWith(u8, arg, "--")) {
-                    const flag_name = arg[2..];
-                    
+                    // Long flag (--flag-name or --flag-name=value)
+                    const flag_part = arg[2..];
+                    var flag_name: []const u8 = undefined;
+                    var flag_value: ?[]const u8 = null;
+
+                    // Check for concatenated value with =
+                    if (std.mem.indexOf(u8, flag_part, "=")) |eq_pos| {
+                        flag_name = flag_part[0..eq_pos];
+                        flag_value = flag_part[eq_pos + 1..];
+                    } else {
+                        flag_name = flag_part;
+                    }
+
                     var flag_found = false;
                     inline for (shared_flags) |FlagType| {
                         if (std.mem.eql(u8, flag_name, FlagType.flag_name)) {
                             flag_found = true;
-                            
+
                             if (@typeInfo(FlagType.ValueType) == .bool) {
                                 // Boolean flag, just consume it
                             } else {
-                                // Non-boolean flag, consume the value too
-                                if (i + 1 >= args.len) {
-                                    std.debug.print("Error: Shared flag --{s} requires a value\n", .{flag_name});
-                                    return 1;
+                                // Non-boolean flag, consume the value too if not concatenated
+                                if (flag_value == null) {
+                                    if (i + 1 >= args.len) {
+                                        std.debug.print("Error: Shared flag --{s} requires a value\n", .{flag_name});
+                                        return 1;
+                                    }
+                                    i += 1;
                                 }
-                                i += 1;
                             }
                             break;
                         }
@@ -114,8 +127,48 @@ pub fn SubCommand(comptime config: anytype) type {
                         break;
                     }
                 } else if (std.mem.startsWith(u8, arg, "-") and arg.len > 1) {
-                    std.debug.print("Error: Short flags not supported yet: {s}\n", .{arg});
-                    return 1;
+                    // Short flag (-f or -f=value)
+                    const flag_part = arg[1..];
+                    var flag_alias: []const u8 = undefined;
+                    var flag_value: ?[]const u8 = null;
+
+                    // Check for concatenated value with =
+                    if (std.mem.indexOf(u8, flag_part, "=")) |eq_pos| {
+                        flag_alias = flag_part[0..eq_pos];
+                        flag_value = flag_part[eq_pos + 1..];
+                    } else {
+                        flag_alias = flag_part;
+                    }
+
+                    // Only support single character aliases
+                    if (flag_alias.len != 1) {
+                        std.debug.print("Error: Short flags must be single characters: {s}\n", .{arg});
+                        return 1;
+                    }
+
+                    // Find matching flag by alias in shared flags
+                    var flag_found = false;
+                    inline for (shared_flags) |FlagType| {
+                        if (FlagType.flag_alias.len > 0 and std.mem.eql(u8, flag_alias, FlagType.flag_alias)) {
+                            flag_found = true;
+                            // Note: SubCommand doesn't parse flag values, just skips them
+                            // The actual parsing happens in the Command
+                            break;
+                        }
+                    }
+
+                    if (!flag_found) {
+                        std.debug.print("Error: Unknown flag -{s}\n", .{flag_alias});
+                        return 1;
+                    }
+
+                    // Skip flag value if it's not concatenated
+                    if (flag_value == null) {
+                        // Check if next arg is a value (doesn't start with -)
+                        if (i + 1 < args.len and !std.mem.startsWith(u8, args[i + 1], "-")) {
+                            i += 1; // Skip the value
+                        }
+                    }
                 } else {
                     // This is the sub-command name
                     break;
@@ -188,7 +241,11 @@ pub fn SubCommand(comptime config: anytype) type {
             if (has_global_flags) {
                 try writer.print("\nGLOBAL FLAGS:\n", .{});
                 inline for (global_flags) |FlagType| {
-                    try writer.print("    --{s:<16} {s}\n", .{ FlagType.flag_name, FlagType.description });
+                    if (FlagType.flag_alias.len > 0) {
+                        try writer.print("    -{s}, --{s:<14} {s}\n", .{ FlagType.flag_alias, FlagType.flag_name, FlagType.description });
+                    } else {
+                        try writer.print("        --{s:<14} {s}\n", .{ FlagType.flag_name, FlagType.description });
+                    }
                 }
             }
 
@@ -196,7 +253,11 @@ pub fn SubCommand(comptime config: anytype) type {
             if (has_shared_flags) {
                 try writer.print("\nSHARED FLAGS:\n", .{});
                 inline for (shared_flags) |FlagType| {
-                    try writer.print("    --{s:<16} {s}\n", .{ FlagType.flag_name, FlagType.description });
+                    if (FlagType.flag_alias.len > 0) {
+                        try writer.print("    -{s}, --{s:<14} {s}\n", .{ FlagType.flag_alias, FlagType.flag_name, FlagType.description });
+                    } else {
+                        try writer.print("        --{s:<14} {s}\n", .{ FlagType.flag_name, FlagType.description });
+                    }
                 }
             }
 
@@ -279,7 +340,7 @@ test "subcommand with nested commands" {
         .description = "Add a new remote",
         .action = addAction,
         .flags = [_]type{
-            Flag(bool, "force", false, "Force add remote"),
+            Flag(bool, "force", false, "Force add remote", "f"),
         },
         .arguments = [_]type{
             Arg([]const u8, "name", "Name of the remote"),
@@ -292,7 +353,7 @@ test "subcommand with nested commands" {
         .description = "Remove a remote",
         .action = removeAction,
         .flags = [_]type{
-            Flag(bool, "verbose", false, "Enable verbose output"),
+            Flag(bool, "verbose", false, "Enable verbose output", "v"),
         },
         .arguments = [_]type{
             Arg([]const u8, "name", "Name of the remote to remove"),
@@ -304,7 +365,7 @@ test "subcommand with nested commands" {
         .description = "List all remotes",
         .action = listAction,
         .flags = [_]type{
-            Flag(bool, "verbose", false, "Show detailed information"),
+            Flag(bool, "verbose", false, "Show detailed information", "v"),
         },
         .arguments = [_]type{},
     });
@@ -315,7 +376,7 @@ test "subcommand with nested commands" {
         .description = "Manage remote repositories",
         .commands = .{ add_command, remove_command, list_command },
         .flags = [_]type{
-            Flag(bool, "dry-run", false, "Show what would be done without executing"),
+            Flag(bool, "dry-run", false, "Show what would be done without executing", "n"),
         },
     });
 
@@ -390,7 +451,7 @@ test "subcommand description accessibility" {
         ,
         .commands = .{test_command},
         .flags = [_]type{
-            Flag(bool, "dry-run", false, "Test dry run flag"),
+            Flag(bool, "dry-run", false, "Test dry run flag", "n"),
         },
     });
 

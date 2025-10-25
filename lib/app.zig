@@ -86,7 +86,18 @@ pub fn App(comptime config: anytype) type {
                 const arg = args[i];
 
                 if (std.mem.startsWith(u8, arg, "--")) {
-                    const flag_name = arg[2..];
+                    // Long flag (--flag-name or --flag-name=value)
+                    const flag_part = arg[2..];
+                    var flag_name: []const u8 = undefined;
+                    var flag_value: ?[]const u8 = null;
+
+                    // Check for concatenated value with =
+                    if (std.mem.indexOf(u8, flag_part, "=")) |eq_pos| {
+                        flag_name = flag_part[0..eq_pos];
+                        flag_value = flag_part[eq_pos + 1..];
+                    } else {
+                        flag_name = flag_part;
+                    }
 
                     var flag_found = false;
                     inline for (global_flags) |FlagType| {
@@ -96,12 +107,14 @@ pub fn App(comptime config: anytype) type {
                             if (@typeInfo(FlagType.ValueType) == .bool) {
                                 // Boolean flag, just consume it
                             } else {
-                                // Non-boolean flag, consume the value too
-                                if (i + 1 >= args.len) {
-                                    std.debug.print("Error: Global flag --{s} requires a value\n", .{flag_name});
-                                    return 1;
+                                // Non-boolean flag, consume the value too if not concatenated
+                                if (flag_value == null) {
+                                    if (i + 1 >= args.len) {
+                                        std.debug.print("Error: Global flag --{s} requires a value\n", .{flag_name});
+                                        return 1;
+                                    }
+                                    i += 1;
                                 }
-                                i += 1;
                             }
                             break;
                         }
@@ -115,8 +128,53 @@ pub fn App(comptime config: anytype) type {
                         break;
                     }
                 } else if (std.mem.startsWith(u8, arg, "-") and arg.len > 1) {
-                    std.debug.print("Error: Short flags not supported yet: {s}\n", .{arg});
-                    return 1;
+                    // Short flag (-f or -f=value)
+                    const flag_part = arg[1..];
+                    var flag_alias: []const u8 = undefined;
+                    var flag_value: ?[]const u8 = null;
+
+                    // Check for concatenated value with =
+                    if (std.mem.indexOf(u8, flag_part, "=")) |eq_pos| {
+                        flag_alias = flag_part[0..eq_pos];
+                        flag_value = flag_part[eq_pos + 1..];
+                    } else {
+                        flag_alias = flag_part;
+                    }
+
+                    // Only support single character aliases
+                    if (flag_alias.len != 1) {
+                        std.debug.print("Error: Short flags must be single characters: {s}\n", .{arg});
+                        return 1;
+                    }
+
+                    var flag_found = false;
+                    inline for (global_flags) |FlagType| {
+                        if (FlagType.flag_alias.len > 0 and std.mem.eql(u8, flag_alias, FlagType.flag_alias)) {
+                            flag_found = true;
+
+                            if (@typeInfo(FlagType.ValueType) == .bool) {
+                                // Boolean flag, just consume it
+                            } else {
+                                // Non-boolean flag, consume the value too if not concatenated
+                                if (flag_value == null) {
+                                    if (i + 1 >= args.len) {
+                                        std.debug.print("Error: Global flag -{s} requires a value\n", .{flag_alias});
+                                        return 1;
+                                    }
+                                    i += 1;
+                                }
+                            }
+                            break;
+                        }
+                    }
+
+                    if (flag_found) {
+                        i += 1;
+                        continue;
+                    } else {
+                        // Not a global flag, might be a command flag
+                        break;
+                    }
                 } else {
                     // This is the command name
                     break;
@@ -191,7 +249,11 @@ pub fn App(comptime config: anytype) type {
             if (has_global_flags) {
                 try writer.print("\nGLOBAL FLAGS:\n", .{});
                 inline for (global_flags) |FlagType| {
-                    try writer.print("    --{s:<16} {s}\n", .{ FlagType.flag_name, FlagType.description });
+                    if (FlagType.flag_alias.len > 0) {
+                        try writer.print("    -{s}, --{s:<14} {s}\n", .{ FlagType.flag_alias, FlagType.flag_name, FlagType.description });
+                    } else {
+                        try writer.print("        --{s:<14} {s}\n", .{ FlagType.flag_name, FlagType.description });
+                    }
                 }
             }
 
@@ -259,7 +321,7 @@ test "app with multiple commands" {
         .description = "Greet a person",
         .action = greetAction,
         .flags = [_]type{
-            Flag(bool, "loud", false, "Use loud greeting"),
+            Flag(bool, "loud", false, "Use loud greeting", "l"),
         },
         .arguments = [_]type{
             Arg([]const u8, "name", "Name of the person to greet"),
@@ -271,7 +333,7 @@ test "app with multiple commands" {
         .description = "Count to a number",
         .action = countAction,
         .flags = [_]type{
-            Flag(bool, "verbose", false, "Enable verbose output"),
+            Flag(bool, "verbose", false, "Enable verbose output", "v"),
         },
         .arguments = [_]type{
             Arg(i32, "number", "Number to count to"),
@@ -284,7 +346,7 @@ test "app with multiple commands" {
         .description = "A test application with multiple commands",
         .commands = .{ greet_command, count_command },
         .flags = [_]type{
-            Flag(bool, "debug", false, "Enable debug mode"),
+            Flag(bool, "debug", false, "Enable debug mode", "d"),
         },
     });
 
@@ -354,7 +416,7 @@ test "app description accessibility" {
         ,
         .commands = .{test_command},
         .flags = [_]type{
-            Flag(bool, "debug", false, "Test debug flag"),
+            Flag(bool, "debug", false, "Test debug flag", "d"),
         },
     });
 

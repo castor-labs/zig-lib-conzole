@@ -318,10 +318,10 @@ pub fn main() !void {
         ,
         .action = containerRunAction,
         .flags = [_]type{
-            conzole.Flag(bool, "detach", false, "Run container in background"),
-            conzole.Flag(bool, "interactive", false, "Keep STDIN open and allocate a pseudo-TTY"),
-            conzole.Flag([]const u8, "name", "", "Assign a name to the container"),
-            conzole.Flag([]const u8, "port", "", "Publish container ports to host"),
+            conzole.Flag(bool, "detach", false, "Run container in background", "d"),
+            conzole.Flag(bool, "interactive", false, "Keep STDIN open and allocate a pseudo-TTY", "i"),
+            conzole.Flag([]const u8, "name", "", "Assign a name to the container", ""),
+            conzole.Flag([]const u8, "port", "", "Publish container ports to host", "p"),
         },
         .arguments = [_]type{
             conzole.Arg([]const u8, "image", "Container image to run"),
@@ -333,8 +333,8 @@ pub fn main() !void {
         .description = "Stop one or more running containers",
         .action = containerStopAction,
         .flags = [_]type{
-            conzole.Flag(bool, "force", false, "Force stop the container"),
-            conzole.Flag(i32, "timeout", 10, "Seconds to wait before killing the container"),
+            conzole.Flag(bool, "force", false, "Force stop the container", "f"),
+            conzole.Flag(i32, "timeout", 10, "Seconds to wait before killing the container", "t"),
         },
         .arguments = [_]type{
             conzole.Arg([]const u8, "container", "Container name or ID to stop"),
@@ -346,7 +346,7 @@ pub fn main() !void {
         .description = "List containers",
         .action = containerListAction,
         .flags = [_]type{
-            conzole.Flag(bool, "all", false, "Show all containers (default shows just running)"),
+            conzole.Flag(bool, "all", false, "Show all containers (default shows just running)", "a"),
         },
         .arguments = [_]type{},
     });
@@ -356,8 +356,8 @@ pub fn main() !void {
         .description = "Remove one or more containers",
         .action = containerRemoveAction,
         .flags = [_]type{
-            conzole.Flag(bool, "force", false, "Force removal of running container"),
-            conzole.Flag(bool, "volumes", false, "Remove associated volumes"),
+            conzole.Flag(bool, "force", false, "Force removal of running container", "f"),
+            conzole.Flag(bool, "volumes", false, "Remove associated volumes", "v"),
         },
         .arguments = [_]type{
             conzole.Arg([]const u8, "container", "Container name or ID to remove"),
@@ -370,7 +370,7 @@ pub fn main() !void {
         .description = "Pull an image or repository from a registry",
         .action = imagePullAction,
         .flags = [_]type{
-            conzole.Flag(bool, "all-tags", false, "Download all tagged images in the repository"),
+            conzole.Flag(bool, "all-tags", false, "Download all tagged images in the repository", "a"),
         },
         .arguments = [_]type{
             conzole.Arg([]const u8, "image", "Image name to pull"),
@@ -382,9 +382,9 @@ pub fn main() !void {
         .description = "Build an image from a Dockerfile",
         .action = imageBuildAction,
         .flags = [_]type{
-            conzole.Flag([]const u8, "tag", "", "Name and optionally tag in 'name:tag' format"),
-            conzole.Flag([]const u8, "file", "Dockerfile", "Name of the Dockerfile"),
-            conzole.Flag(bool, "no-cache", false, "Do not use cache when building the image"),
+            conzole.Flag([]const u8, "tag", "", "Name and optionally tag in 'name:tag' format", "t"),
+            conzole.Flag([]const u8, "file", "Dockerfile", "Name of the Dockerfile", "f"),
+            conzole.Flag(bool, "no-cache", false, "Do not use cache when building the image", ""),
         },
         .arguments = [_]type{
             conzole.Arg([]const u8, "path", "Build context path"),
@@ -396,7 +396,7 @@ pub fn main() !void {
         .description = "List images",
         .action = imageListAction,
         .flags = [_]type{
-            conzole.Flag(bool, "all", false, "Show all images (default hides intermediate images)"),
+            conzole.Flag(bool, "all", false, "Show all images (default hides intermediate images)", "a"),
         },
         .arguments = [_]type{},
     });
@@ -407,8 +407,8 @@ pub fn main() !void {
         .description = "Create a network",
         .action = networkCreateAction,
         .flags = [_]type{
-            conzole.Flag([]const u8, "driver", "bridge", "Driver to manage the network"),
-            conzole.Flag([]const u8, "subnet", "", "Subnet in CIDR format"),
+            conzole.Flag([]const u8, "driver", "bridge", "Driver to manage the network", "d"),
+            conzole.Flag([]const u8, "subnet", "", "Subnet in CIDR format", "s"),
         },
         .arguments = [_]type{
             conzole.Arg([]const u8, "name", "Network name"),
@@ -441,7 +441,7 @@ pub fn main() !void {
         ,
         .commands = .{ container_run_command, container_stop_command, container_list_command, container_remove_command },
         .flags = [_]type{
-            conzole.Flag(bool, "dry-run", false, "Show what would be done without executing"),
+            conzole.Flag(bool, "dry-run", false, "Show what would be done without executing", "n"),
         },
     });
 
@@ -450,7 +450,7 @@ pub fn main() !void {
         .description = "Manage images",
         .commands = .{ image_pull_command, image_build_command, image_list_command },
         .flags = [_]type{
-            conzole.Flag(bool, "dry-run", false, "Show what would be done without executing"),
+            conzole.Flag(bool, "dry-run", false, "Show what would be done without executing", "n"),
         },
     });
 
@@ -459,7 +459,7 @@ pub fn main() !void {
         .description = "Manage networks",
         .commands = .{ network_create_command, network_list_command },
         .flags = [_]type{
-            conzole.Flag(bool, "dry-run", false, "Show what would be done without executing"),
+            conzole.Flag(bool, "dry-run", false, "Show what would be done without executing", "n"),
         },
     });
 
@@ -487,8 +487,8 @@ pub fn main() !void {
         ,
         .commands = .{ container_subcommand, image_subcommand, network_subcommand },
         .flags = [_]type{
-            conzole.Flag(bool, "verbose", false, "Enable verbose output"),
-            conzole.Flag(bool, "quiet", false, "Suppress output"),
+            conzole.Flag(bool, "verbose", false, "Enable verbose output", "v"),
+            conzole.Flag(bool, "quiet", false, "Suppress output", "q"),
         },
     });
 

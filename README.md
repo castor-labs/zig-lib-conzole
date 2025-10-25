@@ -58,8 +58,8 @@ pub fn main() !void {
         ,
         .action = greetAction,
         .flags = [_]type{
-            conzole.Flag(bool, "verbose", false, "Enable verbose output"),
-            conzole.Flag(i32, "count", 1, "Number of times to greet"),
+            conzole.Flag(bool, "verbose", false, "Enable verbose output", "v"),
+            conzole.Flag(i32, "count", 1, "Number of times to greet", "c"),
         },
         .arguments = [_]type{
             conzole.Arg([]const u8, "name", "Name of the person to greet"),
@@ -104,7 +104,7 @@ const greet_command = conzole.Command(.{
     .description = "Greet a person",
     .action = greetAction,
     .flags = [_]type{
-        conzole.Flag(bool, "loud", false, "Use loud greeting"),
+        conzole.Flag(bool, "loud", false, "Use loud greeting", "l"),
     },
     .arguments = [_]type{
         conzole.Arg([]const u8, "name", "Name of the person to greet"),
@@ -116,7 +116,7 @@ const file_command = conzole.Command(.{
     .description = "Process files",
     .action = fileAction,
     .flags = [_]type{
-        conzole.Flag(bool, "compress", false, "Compress the output file"),
+        conzole.Flag(bool, "compress", false, "Compress the output file", "c"),
     },
     .arguments = [_]type{
         conzole.Arg([]const u8, "input", "Input file path"),
@@ -130,8 +130,8 @@ const app = conzole.App(.{
     .description = "A multi-purpose command-line tool",
     .commands = .{ greet_command, file_command },
     .flags = [_]type{
-        conzole.Flag(bool, "verbose", false, "Enable verbose output"),
-        conzole.Flag(bool, "debug", false, "Enable debug mode"),
+        conzole.Flag(bool, "verbose", false, "Enable verbose output", "v"),
+        conzole.Flag(bool, "debug", false, "Enable debug mode", "d"),
     },
 });
 
@@ -195,7 +195,7 @@ const container_subcommand = conzole.SubCommand(.{
     .description = "Manage containers",
     .commands = .{ container_run_command, container_stop_command },
     .flags = [_]type{
-        conzole.Flag(bool, "debug", false, "Enable debug mode"), // Shared across all container commands
+        conzole.Flag(bool, "debug", false, "Enable debug mode", "d"), // Shared across all container commands
     },
 });
 
@@ -205,7 +205,7 @@ const app = conzole.App(.{
     .description = "A Docker-like container management tool",
     .commands = .{ container_subcommand, /* other top-level commands */ },
     .flags = [_]type{
-        conzole.Flag(bool, "verbose", false, "Enable verbose output"),
+        conzole.Flag(bool, "verbose", false, "Enable verbose output", "v"),
     },
 });
 ```
@@ -412,10 +412,33 @@ The help system automatically:
 
 ### Flag
 
-Defines a flag with a default value and description.
+Defines a flag with a default value, description, and optional alias.
 
 ```zig
-conzole.Flag(Type, "flag-name", default_value, "Description of the flag")
+conzole.Flag(Type, "flag-name", default_value, "Description of the flag", "alias")
+```
+
+**Parameters:**
+- `Type`: The type of the flag value (bool, i32, []const u8, etc.)
+- `"flag-name"`: The long flag name (used with `--flag-name`)
+- `default_value`: Default value if flag is not provided
+- `"Description"`: Help text for the flag
+- `"alias"`: Single character alias (used with `-a`), or `""` for no alias
+
+**Flag Usage:**
+```bash
+# Long form
+./app --verbose --count 5
+
+# Short form (aliases)
+./app -v -c 5
+
+# Concatenated values
+./app --verbose=true --count=10
+./app -v=true -c=10
+
+# Mixed usage
+./app -v --count=5 --debug
 ```
 
 ## Container Example

@@ -284,10 +284,20 @@ pub fn Command(comptime config: anytype) type {
             
             while (i < args.len) {
                 const arg = args[i];
-                
+
                 if (std.mem.startsWith(u8, arg, "--")) {
-                    // Long flag (--flag-name)
-                    const flag_name = arg[2..];
+                    // Long flag (--flag-name or --flag-name=value)
+                    const flag_part = arg[2..];
+                    var flag_name: []const u8 = undefined;
+                    var flag_value: ?[]const u8 = null;
+
+                    // Check for concatenated value with =
+                    if (std.mem.indexOf(u8, flag_part, "=")) |eq_pos| {
+                        flag_name = flag_part[0..eq_pos];
+                        flag_value = flag_part[eq_pos + 1..];
+                    } else {
+                        flag_name = flag_part;
+                    }
 
                     // Find matching flag across all hierarchy levels
                     var flag_found = false;
@@ -299,18 +309,23 @@ pub fn Command(comptime config: anytype) type {
 
                             // Check if this flag expects a value
                             if (@typeInfo(FlagType.ValueType) == .bool) {
-                                // Boolean flags don't need a value
-                                @field(parsed_args, &FlagType.field_name) = FlagType.parse(null);
+                                // Boolean flags: use provided value or default to true
+                                @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
                             } else {
                                 // Non-boolean flags need a value
-                                if (i + 1 >= args.len) {
-                                    std.debug.print("Error: Flag --{s} requires a value\n\n", .{flag_name});
-                                    printHelp(shared_flags_param, global_flags_param);
-                                    return 1;
+                                if (flag_value == null) {
+                                    // No concatenated value, check next argument
+                                    if (i + 1 >= args.len) {
+                                        std.debug.print("Error: Flag --{s} requires a value\n\n", .{flag_name});
+                                        printHelp(shared_flags_param, global_flags_param);
+                                        return 1;
+                                    }
+                                    i += 1;
+                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(args[i]);
+                                } else {
+                                    // Use concatenated value
+                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
                                 }
-                                i += 1;
-                                const flag_value = args[i];
-                                @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
                             }
                             break;
                         }
@@ -323,16 +338,19 @@ pub fn Command(comptime config: anytype) type {
                                 flag_found = true;
 
                                 if (@typeInfo(FlagType.ValueType) == .bool) {
-                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(null);
-                                } else {
-                                    if (i + 1 >= args.len) {
-                                        std.debug.print("Error: Shared flag --{s} requires a value\n\n", .{flag_name});
-                                        printHelp(shared_flags_param, global_flags_param);
-                                        return 1;
-                                    }
-                                    i += 1;
-                                    const flag_value = args[i];
                                     @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
+                                } else {
+                                    if (flag_value == null) {
+                                        if (i + 1 >= args.len) {
+                                            std.debug.print("Error: Shared flag --{s} requires a value\n\n", .{flag_name});
+                                            printHelp(shared_flags_param, global_flags_param);
+                                            return 1;
+                                        }
+                                        i += 1;
+                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(args[i]);
+                                    } else {
+                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
+                                    }
                                 }
                                 break;
                             }
@@ -346,16 +364,19 @@ pub fn Command(comptime config: anytype) type {
                                 flag_found = true;
 
                                 if (@typeInfo(FlagType.ValueType) == .bool) {
-                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(null);
-                                } else {
-                                    if (i + 1 >= args.len) {
-                                        std.debug.print("Error: Global flag --{s} requires a value\n\n", .{flag_name});
-                                        printHelp(shared_flags_param, global_flags_param);
-                                        return 1;
-                                    }
-                                    i += 1;
-                                    const flag_value = args[i];
                                     @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
+                                } else {
+                                    if (flag_value == null) {
+                                        if (i + 1 >= args.len) {
+                                            std.debug.print("Error: Global flag --{s} requires a value\n\n", .{flag_name});
+                                            printHelp(shared_flags_param, global_flags_param);
+                                            return 1;
+                                        }
+                                        i += 1;
+                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(args[i]);
+                                    } else {
+                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
+                                    }
                                 }
                                 break;
                             }
@@ -368,12 +389,110 @@ pub fn Command(comptime config: anytype) type {
                         return 1;
                     }
                 } else if (std.mem.startsWith(u8, arg, "-") and arg.len > 1) {
-                    // Short flag (-f)
-                    // For simplicity, we'll treat short flags the same as long flags
-                    // In a more complete implementation, you might want to support single-character flags
-                    std.debug.print("Error: Short flags not supported yet: {s}\n\n", .{arg});
-                    printHelp(shared_flags_param, global_flags_param);
-                    return 1;
+                    // Short flag (-f or -f=value)
+                    const flag_part = arg[1..];
+                    var flag_alias: []const u8 = undefined;
+                    var flag_value: ?[]const u8 = null;
+
+                    // Check for concatenated value with =
+                    if (std.mem.indexOf(u8, flag_part, "=")) |eq_pos| {
+                        flag_alias = flag_part[0..eq_pos];
+                        flag_value = flag_part[eq_pos + 1..];
+                    } else {
+                        flag_alias = flag_part;
+                    }
+
+                    // Only support single character aliases
+                    if (flag_alias.len != 1) {
+                        std.debug.print("Error: Short flags must be single characters: {s}\n\n", .{arg});
+                        printHelp(shared_flags_param, global_flags_param);
+                        return 1;
+                    }
+
+                    // Find matching flag by alias across all hierarchy levels
+                    var flag_found = false;
+
+                    // Check command flags first
+                    inline for (flags) |FlagType| {
+                        if (FlagType.flag_alias.len > 0 and std.mem.eql(u8, flag_alias, FlagType.flag_alias)) {
+                            flag_found = true;
+
+                            if (@typeInfo(FlagType.ValueType) == .bool) {
+                                @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
+                            } else {
+                                if (flag_value == null) {
+                                    if (i + 1 >= args.len) {
+                                        std.debug.print("Error: Flag -{s} requires a value\n\n", .{flag_alias});
+                                        printHelp(shared_flags_param, global_flags_param);
+                                        return 1;
+                                    }
+                                    i += 1;
+                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(args[i]);
+                                } else {
+                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
+                                }
+                            }
+                            break;
+                        }
+                    }
+
+                    // Check shared flags if not found in command flags
+                    if (!flag_found) {
+                        inline for (shared_flags_param) |FlagType| {
+                            if (FlagType.flag_alias.len > 0 and std.mem.eql(u8, flag_alias, FlagType.flag_alias)) {
+                                flag_found = true;
+
+                                if (@typeInfo(FlagType.ValueType) == .bool) {
+                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
+                                } else {
+                                    if (flag_value == null) {
+                                        if (i + 1 >= args.len) {
+                                            std.debug.print("Error: Shared flag -{s} requires a value\n\n", .{flag_alias});
+                                            printHelp(shared_flags_param, global_flags_param);
+                                            return 1;
+                                        }
+                                        i += 1;
+                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(args[i]);
+                                    } else {
+                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+
+                    // Check global flags if not found in shared flags
+                    if (!flag_found) {
+                        inline for (global_flags_param) |FlagType| {
+                            if (FlagType.flag_alias.len > 0 and std.mem.eql(u8, flag_alias, FlagType.flag_alias)) {
+                                flag_found = true;
+
+                                if (@typeInfo(FlagType.ValueType) == .bool) {
+                                    @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
+                                } else {
+                                    if (flag_value == null) {
+                                        if (i + 1 >= args.len) {
+                                            std.debug.print("Error: Global flag -{s} requires a value\n\n", .{flag_alias});
+                                            printHelp(shared_flags_param, global_flags_param);
+                                            return 1;
+                                        }
+                                        i += 1;
+                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(args[i]);
+                                    } else {
+                                        @field(parsed_args, &FlagType.field_name) = FlagType.parse(flag_value);
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!flag_found) {
+                        std.debug.print("Error: Unknown flag -{s}\n\n", .{flag_alias});
+                        printHelp(shared_flags_param, global_flags_param);
+                        return 1;
+                    }
                 } else {
                     // This is a positional argument
                     if (arg_index >= arguments.len) {
@@ -455,7 +574,11 @@ pub fn Command(comptime config: anytype) type {
             if (has_global_flags) {
                 try writer.print("\nGLOBAL FLAGS:\n", .{});
                 inline for (global_flags_param) |FlagType| {
-                    try writer.print("    --{s:<16} {s}\n", .{ FlagType.flag_name, FlagType.description });
+                    if (FlagType.flag_alias.len > 0) {
+                        try writer.print("    -{s}, --{s:<14} {s}\n", .{ FlagType.flag_alias, FlagType.flag_name, FlagType.description });
+                    } else {
+                        try writer.print("        --{s:<14} {s}\n", .{ FlagType.flag_name, FlagType.description });
+                    }
                 }
             }
 
@@ -463,7 +586,11 @@ pub fn Command(comptime config: anytype) type {
             if (has_shared_flags) {
                 try writer.print("\nSHARED FLAGS:\n", .{});
                 inline for (shared_flags_param) |FlagType| {
-                    try writer.print("    --{s:<16} {s}\n", .{ FlagType.flag_name, FlagType.description });
+                    if (FlagType.flag_alias.len > 0) {
+                        try writer.print("    -{s}, --{s:<14} {s}\n", .{ FlagType.flag_alias, FlagType.flag_name, FlagType.description });
+                    } else {
+                        try writer.print("        --{s:<14} {s}\n", .{ FlagType.flag_name, FlagType.description });
+                    }
                 }
             }
 
@@ -471,7 +598,11 @@ pub fn Command(comptime config: anytype) type {
             if (has_command_flags) {
                 try writer.print("\nFLAGS:\n", .{});
                 inline for (flags) |FlagType| {
-                    try writer.print("    --{s:<16} {s}\n", .{ FlagType.flag_name, FlagType.description });
+                    if (FlagType.flag_alias.len > 0) {
+                        try writer.print("    -{s}, --{s:<14} {s}\n", .{ FlagType.flag_alias, FlagType.flag_name, FlagType.description });
+                    } else {
+                        try writer.print("        --{s:<14} {s}\n", .{ FlagType.flag_name, FlagType.description });
+                    }
                 }
             }
 
@@ -509,7 +640,7 @@ test "command description accessibility" {
             @import("./arg.zig").Arg([]const u8, "name", "Test name argument"),
         },
         .flags = [_]type{
-            @import("./flag.zig").Flag(bool, "verbose", false, "Test verbose flag"),
+            @import("./flag.zig").Flag(bool, "verbose", false, "Test verbose flag", "v"),
         },
     });
 
@@ -518,6 +649,66 @@ test "command description accessibility" {
     try std.testing.expect(std.mem.eql(u8, test_command.name, "test-cmd"));
     try std.testing.expect(test_command.help.len > 0);
     try std.testing.expect(std.mem.indexOf(u8, test_command.help, "longer help text") != null);
+}
+
+test "short flags and concatenated values" {
+    const TestArgs = struct {
+        name: []const u8,
+        verbose: bool,
+        count: i32,
+        debug: bool,
+    };
+
+    const testAction = struct {
+        fn execute(args: TestArgs) !u8 {
+            _ = args;
+            return 0;
+        }
+    }.execute;
+
+    const test_command = Command(.{
+        .name = "test-flags",
+        .description = "Test command for flag parsing",
+        .action = testAction,
+        .arguments = [_]type{
+            @import("./arg.zig").Arg([]const u8, "name", "Test name argument"),
+        },
+        .flags = [_]type{
+            @import("./flag.zig").Flag(bool, "verbose", false, "Enable verbose output", "v"),
+            @import("./flag.zig").Flag(i32, "count", 1, "Number of items", "c"),
+            @import("./flag.zig").Flag(bool, "debug", false, "Enable debug mode", ""),
+        },
+    });
+
+    // Test short flag
+    var short_flag_args = [_][:0]u8{
+        @constCast("-v"),
+        @constCast("testname")
+    };
+    _ = try test_command.execute(short_flag_args[0..]);
+
+    // Test concatenated long flag
+    var concat_long_args = [_][:0]u8{
+        @constCast("--count=5"),
+        @constCast("testname")
+    };
+    _ = try test_command.execute(concat_long_args[0..]);
+
+    // Test concatenated short flag
+    var concat_short_args = [_][:0]u8{
+        @constCast("-c=10"),
+        @constCast("testname")
+    };
+    _ = try test_command.execute(concat_short_args[0..]);
+
+    // Test mixed flags
+    var mixed_args = [_][:0]u8{
+        @constCast("-v"),
+        @constCast("--count=3"),
+        @constCast("--debug"),
+        @constCast("testname")
+    };
+    _ = try test_command.execute(mixed_args[0..]);
 }
 
 

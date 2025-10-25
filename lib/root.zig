@@ -46,7 +46,7 @@ test "help rendering functionality" {
             Arg([]const u8, "name", "Name of the person to greet"),
         },
         .flags = [_]type{
-            Flag(bool, "verbose", false, "Enable verbose output"),
+            Flag(bool, "verbose", false, "Enable verbose output", "v"),
         },
     });
 
@@ -62,7 +62,7 @@ test "help rendering functionality" {
         ,
         .commands = .{test_command},
         .flags = [_]type{
-            Flag(bool, "debug", false, "Enable debug mode"),
+            Flag(bool, "debug", false, "Enable debug mode", "d"),
         },
     });
 
